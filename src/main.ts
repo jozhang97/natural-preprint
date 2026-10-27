@@ -1,4 +1,5 @@
 import "./style.css";
+import { initAnalytics, trackUsage } from "./analytics";
 import {
   getDocument,
   type PDFDocumentProxy,
@@ -20,6 +21,8 @@ import type {
   Settings,
   TypographyReference,
 } from "./types";
+
+initAnalytics();
 
 const arrow =
   '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="M5 12h14m-6-6 6 6-6 6"/></svg>';
@@ -53,6 +56,7 @@ document.querySelector<HTMLDivElement>("#app")!.innerHTML = `
 
     <section id="results" class="wrap results" hidden aria-labelledby="results-title"><div class="results-heading"><div><h2 id="results-title" tabindex="-1">Your Natural Preprint is ready.</h2><p id="result-summary"></p></div><button class="primary" id="download-pdf" type="button">Download PDF <span aria-hidden="true">↓</span></button></div><div class="review-note"><span aria-hidden="true">ⓘ</span><p>Take a moment to compare. PDF structure is inferred, so paragraphs, symbols, and figures may need a closer look.</p></div><div class="preview-grid"><article class="preview-pane"><div class="preview-heading"><h3>Original</h3><span id="original-count"></span></div><div class="canvas-stage" tabindex="0" role="region" aria-label="Scrollable original PDF preview"><canvas id="original-canvas" aria-label="Original PDF page preview"></canvas></div><div class="page-controls"><button id="original-prev" type="button" aria-label="Previous original page">←</button><span id="original-page"></span><button id="original-next" type="button" aria-label="Next original page">→</button></div></article><article class="preview-pane"><div class="preview-heading"><h3>Natural Preprint</h3><span class="preview-badge">REFORMATTED</span></div><div class="canvas-stage" tabindex="0" role="region" aria-label="Scrollable reformatted PDF preview"><canvas id="output-canvas" aria-label="Reformatted PDF page preview"></canvas></div><div class="page-controls"><button id="output-prev" type="button" aria-label="Previous reformatted page">←</button><span id="output-page"></span><button id="output-next" type="button" aria-label="Next reformatted page">→</button></div></article></div><p id="preview-error" class="error-box" hidden role="alert"></p><details class="review-details"><summary><span>Extraction notes & text checks</span><span id="warning-count"></span></summary><p id="text-check-summary"></p><ul id="warning-list"></ul></details><div class="result-actions"><button class="secondary" id="edit-manuscript" type="button">Edit manuscript</button><button class="text-button" id="download-json" type="button">Download manuscript JSON ↓</button><button class="text-button" id="download-report" type="button">Download report ↓</button><button class="text-button start-over" id="start-over" type="button">Start another paper ${arrow}</button></div></section>
 
+    <p class="wrap field-help">When enabled, usage analytics count visits, conversions, and downloads. PDF contents, filenames, and pasted links are excluded.</p>
   </main>
   <dialog id="editor-dialog" aria-labelledby="editor-title"><div class="dialog-heading"><div><div class="eyebrow">FINE-TUNE THE DETAILS</div><h2 id="editor-title">Edit your manuscript</h2></div><button class="icon-button" id="close-editor" aria-label="Close editor" type="button">×</button></div><p>Edit text, block types, or visual crop boxes, then render again. If you change a block’s text, its formatting resets unless you also update its spans. Crop coordinates use PDF points from the top left; source pages start at zero.</p><label class="sr-only" for="manifest-editor">Manuscript JSON</label><textarea id="manifest-editor" spellcheck="false"></textarea><div id="editor-error" class="error-box" role="alert" hidden></div><div class="dialog-actions"><button class="secondary" id="import-json" type="button">Import JSON</button><input id="json-input" type="file" accept="application/json,.json" hidden /><button class="primary" id="render-edits" type="button">Render changes ${arrow}</button></div></dialog>
 `;
@@ -296,6 +300,7 @@ async function run(edited?: Manuscript, demo = false) {
     }).promise;
     signal.throwIfAborted();
     await showResults();
+    trackUsage(edited ? "edit-completed" : demo ? "sample-completed" : "conversion-completed");
   } catch (e) {
     await destroyPreviews();
     $("workspace").hidden = false;
@@ -416,8 +421,10 @@ function filename(extension: string) {
     .slice(0, 100)}-natural-preprint.${extension}`;
 }
 $("download-pdf").addEventListener("click", () => {
-  if (outputBytes)
+  if (outputBytes) {
     download(outputBytes.slice().buffer, filename("pdf"), "application/pdf");
+    trackUsage("pdf-downloaded");
+  }
 });
 $("download-json").addEventListener("click", () =>
   download(

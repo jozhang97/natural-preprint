@@ -28,6 +28,23 @@ The included `.github/workflows/pages.yml` builds the app, runs Chromium browser
 
 This local directory was not initialized as a Git repository when the website was built. Adding the workflow does not publish the site or configure a GitHub repository automatically.
 
+## Usage analytics
+
+The GitHub Pages workflow is configured for the [jozhang97 GoatCounter dashboard](https://jozhang97.goatcounter.com). Tracking starts once these changes are deployed. The public site code, `jozhang97`, is set as `VITE_GOATCOUNTER_CODE` in `.github/workflows/pages.yml`; no API key or repository secret is needed. For another site, replace that value with its GoatCounter site code.
+
+Open `https://jozhang97.goatcounter.com` to view visits over time and usage events:
+
+- `conversion-completed`: a user's paper successfully converted.
+- `sample-completed`: the bundled sample successfully converted.
+- `edit-completed`: an edited manuscript successfully rendered.
+- `pdf-downloaded`: a generated PDF download was requested (including samples).
+
+Visits use a fixed `/` path and title. Events contain only the fixed labels above; no document metadata, source links, query strings, or referrers are sent in analytics payloads. The analytics provider receives normal network connection information. GoatCounter's [JavaScript API](https://www.goatcounter.com/help/js) handles counting; analytics failures do not block the app. Blocked scripts and Do Not Track visitors are not counted, so counts are approximate.
+
+Tracking runs only in production builds served over HTTPS, excluding localhost and visitors with Do Not Track enabled. Local development and browser tests do not send analytics. For a manual check, visit the deployed site, convert the sample, download it, and check the dashboard. Set `VITE_GOATCOUNTER_CODE` to an empty string in the workflow and redeploy to disable tracking. For a separate hosting setup, copy `.env.example` to `.env.local`, set the code, and rebuild.
+
+Run `npm run test:analytics` to check configuration gating, event payloads, and failure handling without contacting GoatCounter.
+
 ## Features
 
 - Local PDFs and direct HTTPS PDF links that permit cross-origin requests.
@@ -42,7 +59,7 @@ This local directory was not initialized as a Git repository when the website wa
 - Downloads for the PDF, editable manuscript JSON, and verification report.
 - A JSON editor with import and re-rendering against the same source PDF.
 
-Selected documents and outputs remain in memory. Reloading or **Start another paper** clears the source and result. An optional typography reference remains available until cleared or the page is reloaded. No analytics, remote font services, AI, or conversion servers are used. Pasting a link makes a request directly to that source website; local files are never uploaded. The site serves its own fonts and PDF.js support assets.
+Selected documents and outputs remain in memory. Reloading or **Start another paper** clears the source and result. An optional typography reference remains available until cleared or the page is reloaded. Optional GoatCounter analytics count visits and fixed usage events; no document contents, filenames, pasted PDF links, or error messages are included. No remote font services, AI, or conversion servers are used. Pasting a link makes a request directly to that source website; local files are never uploaded. The site serves its own fonts and PDF.js support assets.
 
 ## Match an article's typography
 

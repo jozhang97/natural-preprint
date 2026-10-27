@@ -5,3 +5,5 @@ playwright-report/
 .DS_Store
 __pycache__/
 public/pdfjs/
+.env.local
+.env.*.local

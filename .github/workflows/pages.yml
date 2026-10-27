@@ -18,7 +18,10 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
+      - run: npm run test:analytics
       - run: npm run build
+        env:
+          VITE_GOATCOUNTER_CODE: jozhang97
       - run: npx playwright install --with-deps chromium
       - run: npm test -- --project=chromium
       - uses: actions/configure-pages@v5
