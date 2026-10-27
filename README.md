@@ -39,7 +39,7 @@ Open `https://jozhang97.goatcounter.com` to view visits over time and usage even
 - `edit-completed`: an edited manuscript successfully rendered.
 - `pdf-downloaded`: a generated PDF download was requested (including samples).
 
-Visits use a fixed `/` path and title. Events contain only the fixed labels above; no document metadata, source links, query strings, or referrers are sent in analytics payloads. The analytics provider receives normal network connection information. GoatCounter's [JavaScript API](https://www.goatcounter.com/help/js) handles counting; analytics failures do not block the app. Blocked scripts and Do Not Track visitors are not counted, so counts are approximate.
+Visits use a fixed `/natural-preprint/` path and title, keeping them separate from homepage visits recorded as `/` in the same dashboard. Events contain only the fixed labels above; no document metadata, source links, query strings, or referrers are sent in analytics payloads. The analytics provider receives normal network connection information. GoatCounter's [JavaScript API](https://www.goatcounter.com/help/js) handles counting; analytics failures do not block the app. Blocked scripts and Do Not Track visitors are not counted, so counts are approximate.
 
 Tracking runs only in production builds served over HTTPS, excluding localhost and visitors with Do Not Track enabled. Local development and browser tests do not send analytics. For a manual check, visit the deployed site, convert the sample, download it, and check the dashboard. Set `VITE_GOATCOUNTER_CODE` to an empty string in the workflow and redeploy to disable tracking. For a separate hosting setup, copy `.env.example` to `.env.local`, set the code, and rebuild.
 

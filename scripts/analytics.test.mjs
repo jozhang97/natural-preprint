@@ -59,7 +59,7 @@ test("one pageview and queued events use only fixed payloads", () => {
   app.load();
   app.trackUsage("pdf-downloaded");
   assert.deepEqual(app.calls, [
-    { path: "/", title: "Natural Preprint", referrer: "" },
+    { path: "/natural-preprint/", title: "Natural Preprint", referrer: "" },
     ...["conversion-completed", "pdf-downloaded"].map((event) => ({
       path: event, title: event, referrer: "", event: true, no_session: true,
     })),

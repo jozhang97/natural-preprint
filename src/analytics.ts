@@ -46,7 +46,7 @@ export function initAnalytics() {
   script.onload = () => {
     ready = true;
     // Fixed labels avoid collecting query strings, document metadata, or URLs.
-    count({ path: "/", title: "Natural Preprint", referrer: "" });
+    count({ path: "/natural-preprint/", title: "Natural Preprint", referrer: "" });
     pending.splice(0).forEach(trackUsage);
   };
   script.onerror = () => {
