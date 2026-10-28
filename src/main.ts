@@ -39,7 +39,7 @@ document.querySelector<HTMLDivElement>("#app")!.innerHTML = `
         <div class="card-header"><div><h1 id="workspace-title">Start with a paper.</h1></div></div>
         <div class="input-tabs" role="tablist" aria-label="PDF input method"><button id="upload-tab" role="tab" aria-selected="true" aria-controls="upload-panel" type="button">${fileIcon} Upload PDF</button><button id="link-tab" role="tab" aria-selected="false" aria-controls="link-panel" tabindex="-1" type="button"><span aria-hidden="true">↗</span> Paste a link</button></div>
         <div id="upload-panel" role="tabpanel" aria-labelledby="upload-tab">
-          <button class="dropzone" id="dropzone" type="button"><span class="upload-icon">${fileIcon}<span>+</span></span><strong id="file-name">Drop your paper here</strong><span id="file-description">or <u>browse files</u> to get started</span><small>PDF · up to 25 MB · 80 pages</small></button>
+          <button class="dropzone" id="dropzone" type="button"><span class="upload-icon">${fileIcon}<span>+</span></span><strong id="file-name">Drop your paper here</strong><span id="file-description">or <u>browse files</u> to get started</span><small>PDF · up to 100 MB · 80 pages</small></button>
           <input id="file-input" type="file" accept="application/pdf,.pdf" hidden />
         </div>
         <div id="link-panel" role="tabpanel" aria-labelledby="link-tab" hidden><label for="pdf-url">Direct PDF link</label><div class="url-field"><span aria-hidden="true">↗</span><input type="url" id="pdf-url" placeholder="https://example.org/paper.pdf" autocomplete="off" spellcheck="false" /></div><p class="field-help">Use a public link to the PDF itself. Some websites block browser access; download the paper and upload it here if that happens.</p></div>
@@ -127,7 +127,7 @@ function chooseFile(file: File) {
   clearError();
   if (file.size > MAX_BYTES) {
     showError(
-      "This file exceeds the 25 MB limit. Please choose a smaller PDF.",
+      "This file exceeds the 100 MB limit. Please choose a smaller PDF.",
     );
     return;
   }
@@ -519,7 +519,7 @@ $("reference-input").addEventListener("change", async () => {
   $("reference-status").textContent = "Reading embedded fonts…";
   try {
     if (file.size > MAX_BYTES)
-      throw new Error("The reference PDF must be smaller than 25 MB.");
+      throw new Error("The reference PDF must be smaller than 100 MB.");
     const { readReference } = await import("./reference");
     typographyReference = await readReference(
       new Uint8Array(await file.arrayBuffer()),

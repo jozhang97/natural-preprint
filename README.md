@@ -71,7 +71,7 @@ The reference changes fonts and page size. It does not copy the reference's text
 
 This is an assisted reading tool, not a lossless PDF parser or journal submission formatter. Always compare the result with the original.
 
-- Maximum source: **25 MB**, **80 pages**, **600,000 extracted characters**. Maximum output: 250 pages. Conversion timeout: three minutes. Device memory can impose tighter limits.
+- Maximum source: **100 MB**, **80 pages**, **600,000 extracted characters**. Maximum output: 250 pages. Conversion timeout: three minutes. Device memory can impose tighter limits.
 - Best input: digital, single-column preprints with selectable text. Scans need OCR elsewhere. Password-protected PDFs must be unlocked first.
 - Links: the source must permit browser access through CORS. There is no proxy to bypass CORS, authentication, or paywalls. Article landing pages are unsupported. Download and select the PDF locally if a link fails.
 - Text: reading order, paragraph boundaries, and styles are inferred. Multi-column sources, unusual encodings, and mathematical notation need review. Missing font glyphs are flagged and replaced visibly.
