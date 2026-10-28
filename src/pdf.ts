@@ -16,8 +16,8 @@ import type {
 } from "./types";
 
 pdfjs.GlobalWorkerOptions.workerSrc = workerUrl;
-export const MAX_BYTES = 100 * 1024 * 1024;
-export const MAX_PAGES = 80;
+export const LARGE_PDF_BYTES = 100 * 1024 * 1024;
+export const LARGE_PDF_PAGES = 200;
 export function pdfOptions() {
   const base = new URL(import.meta.env.BASE_URL, document.baseURI);
   return {
@@ -49,11 +49,8 @@ export async function hash(bytes: Uint8Array): Promise<string> {
 export async function openPdf(
   bytes: Uint8Array,
   signal?: AbortSignal,
+  confirmManyPages: (pages: number) => boolean = () => false,
 ): Promise<PDFDocumentProxy> {
-  if (bytes.length > MAX_BYTES)
-    throw new Error(
-      "This PDF exceeds the 100 MB limit. Try a smaller document.",
-    );
   if (!new TextDecoder().decode(bytes.slice(0, 1024)).includes("%PDF-"))
     throw new Error("This file is not a PDF. Please choose a PDF document.");
   const task = pdfjs.getDocument({ data: bytes.slice(), ...pdfOptions() });
@@ -64,11 +61,9 @@ export async function openPdf(
   try {
     signal?.throwIfAborted();
     const doc = await task.promise;
-    if (doc.numPages > MAX_PAGES) {
+    if (doc.numPages > LARGE_PDF_PAGES && !confirmManyPages(doc.numPages)) {
       await doc.loadingTask.destroy();
-      throw new Error(
-        `This document has ${doc.numPages} pages. The browser converter supports up to ${MAX_PAGES}.`,
-      );
+      throw new DOMException("Large PDF conversion cancelled.", "AbortError");
     }
     return doc;
   } catch (error) {
@@ -280,6 +275,7 @@ export async function fetchPdf(
   urlText: string,
   signal: AbortSignal,
   progress: Progress,
+  confirmLargePdf: (bytes: number) => boolean = () => false,
 ): Promise<{ bytes: Uint8Array; name: string }> {
   let url: URL;
   try {
@@ -307,9 +303,13 @@ export async function fetchPdf(
       `The source returned HTTP ${response.status}. Download the PDF from its website and select it here.`,
     );
   const total = Number(response.headers.get("content-length"));
-  if (total > MAX_BYTES) {
-    await response.body?.cancel();
-    throw new Error("The linked PDF exceeds the 100 MB limit.");
+  let largePdfApproved = false;
+  if (total > LARGE_PDF_BYTES) {
+    largePdfApproved = confirmLargePdf(total);
+    if (!largePdfApproved) {
+      await response.body?.cancel();
+      throw new DOMException("Large PDF download cancelled.", "AbortError");
+    }
   }
   const reader = response.body?.getReader();
   if (!reader)
@@ -324,8 +324,11 @@ export async function fetchPdf(
       const { done, value } = await reader.read();
       if (done) break;
       length += value.length;
-      if (length > MAX_BYTES)
-        throw new Error("The linked PDF exceeds the 100 MB limit.");
+      if (length > LARGE_PDF_BYTES && !largePdfApproved) {
+        largePdfApproved = confirmLargePdf(length);
+        if (!largePdfApproved)
+          throw new DOMException("Large PDF download cancelled.", "AbortError");
+      }
       chunks.push(value);
       progress(
         total ? Math.min(10, (length / total) * 10) : 5,

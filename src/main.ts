@@ -10,7 +10,7 @@ import {
   extract,
   fetchPdf,
   hash,
-  MAX_BYTES,
+  LARGE_PDF_BYTES,
   openPdf,
   pdfOptions,
   validateManifest,
@@ -39,7 +39,7 @@ document.querySelector<HTMLDivElement>("#app")!.innerHTML = `
         <div class="card-header"><div><h1 id="workspace-title">Start with a paper.</h1></div></div>
         <div class="input-tabs" role="tablist" aria-label="PDF input method"><button id="upload-tab" role="tab" aria-selected="true" aria-controls="upload-panel" type="button">${fileIcon} Upload PDF</button><button id="link-tab" role="tab" aria-selected="false" aria-controls="link-panel" tabindex="-1" type="button"><span aria-hidden="true">↗</span> Paste a link</button></div>
         <div id="upload-panel" role="tabpanel" aria-labelledby="upload-tab">
-          <button class="dropzone" id="dropzone" type="button"><span class="upload-icon">${fileIcon}<span>+</span></span><strong id="file-name">Drop your paper here</strong><span id="file-description">or <u>browse files</u> to get started</span><small>PDF · up to 100 MB · 80 pages</small></button>
+          <button class="dropzone" id="dropzone" type="button"><span class="upload-icon">${fileIcon}<span>+</span></span><strong id="file-name">Drop your paper here</strong><span id="file-description">or <u>browse files</u> to get started</span><small>PDF · confirmation above 100 MB or 200 pages</small></button>
           <input id="file-input" type="file" accept="application/pdf,.pdf" hidden />
         </div>
         <div id="link-panel" role="tabpanel" aria-labelledby="link-tab" hidden><label for="pdf-url">Direct PDF link</label><div class="url-field"><span aria-hidden="true">↗</span><input type="url" id="pdf-url" placeholder="https://example.org/paper.pdf" autocomplete="off" spellcheck="false" /></div><p class="field-help">Use a public link to the PDF itself. Some websites block browser access; download the paper and upload it here if that happens.</p></div>
@@ -123,18 +123,19 @@ for (const mode of ["upload", "link"] as const) {
     }
   });
 }
+function confirmLargePdf(bytes: number): boolean {
+  return window.confirm(
+    `This is a large PDF (${(bytes / 1024 / 1024).toFixed(1)} MB). Processing may take longer or cause this browser tab to run out of memory. Conversion has a three-minute timeout.\n\nContinue anyway?`,
+  );
+}
+
 function chooseFile(file: File) {
   clearError();
-  if (file.size > MAX_BYTES) {
-    showError(
-      "This file exceeds the 100 MB limit. Please choose a smaller PDF.",
-    );
-    return;
-  }
   if (!/\.pdf$/i.test(file.name) && file.type !== "application/pdf") {
     showError("Please choose a PDF file.");
     return;
   }
+  if (file.size > LARGE_PDF_BYTES && !confirmLargePdf(file.size)) return;
   selectedFile = file;
   selectTab("upload");
   $("file-name").textContent = file.name;
@@ -254,6 +255,7 @@ async function run(edited?: Manuscript, demo = false) {
           $<HTMLInputElement>("pdf-url").value.trim(),
           signal,
           progress,
+          confirmLargePdf,
         );
         sourceBytes = result.bytes;
         name = result.name;
@@ -263,7 +265,11 @@ async function run(edited?: Manuscript, demo = false) {
         name = selectedFile.name;
       }
       signal.throwIfAborted();
-      sourceDoc = await openPdf(sourceBytes, signal);
+      sourceDoc = await openPdf(sourceBytes, signal, (pages) =>
+        window.confirm(
+          `This PDF has ${pages} pages, above the recommended 200 pages. Conversion may take longer or cause this browser tab to run out of memory. The three-minute timeout, 600,000-character limit, and 250-output-page limit still apply.\n\nContinue anyway?`,
+        ),
+      );
       const destroyOnAbort = () => {
         void sourceDoc?.loadingTask.destroy();
       };
@@ -512,14 +518,16 @@ $("reference-input").addEventListener("change", async () => {
   const file = $<HTMLInputElement>("reference-input").files?.[0];
   if (!file) return;
   clearError();
+  if (file.size > LARGE_PDF_BYTES && !confirmLargePdf(file.size)) {
+    $<HTMLInputElement>("reference-input").value = "";
+    return;
+  }
   referenceLoading = true;
   $<HTMLButtonElement>("demo-button").disabled = true;
   const button = $<HTMLButtonElement>("convert-button");
   button.disabled = true;
   $("reference-status").textContent = "Reading embedded fonts…";
   try {
-    if (file.size > MAX_BYTES)
-      throw new Error("The reference PDF must be smaller than 100 MB.");
     const { readReference } = await import("./reference");
     typographyReference = await readReference(
       new Uint8Array(await file.arrayBuffer()),

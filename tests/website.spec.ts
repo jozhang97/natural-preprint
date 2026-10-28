@@ -597,3 +597,42 @@ test("local TCR source matches the supplied article reference structure", async 
     m.floats.find((f: { id: string }) => f.id === "figure-15-0").caption,
   ).toContain("Docking geometry");
 });
+
+test("large local PDFs can be declined or selected after confirmation", async ({ page }) => {
+  await page.goto("/");
+  for (const accept of [false, true]) {
+    page.once("dialog", async (dialog) => {
+      expect(dialog.message()).toContain("Continue anyway?");
+      if (accept) await dialog.accept();
+      else await dialog.dismiss();
+    });
+    await page.evaluate(() => {
+      const file = new File(["%PDF-"], "large.pdf", { type: "application/pdf" });
+      Object.defineProperty(file, "size", { value: 101 * 1024 * 1024 });
+      const transfer = new DataTransfer();
+      transfer.items.add(file);
+      const input = document.querySelector<HTMLInputElement>("#file-input")!;
+      input.files = transfer.files;
+      input.dispatchEvent(new Event("change"));
+    });
+    if (accept) await expect(page.locator("#file-name")).toHaveText("large.pdf");
+    else await expect(page.locator("#file-name")).toHaveText("Drop your paper here");
+  }
+});
+
+test("source PDFs above 200 pages ask before extraction", async ({ page }) => {
+  const pdf = await PDFDocument.create();
+  for (let i = 0; i < 201; i++) pdf.addPage();
+  await page.goto("/");
+  await page.locator("#file-input").setInputFiles({
+    name: "long.pdf", mimeType: "application/pdf", buffer: Buffer.from(await pdf.save()),
+  });
+  page.once("dialog", async (dialog) => {
+    expect(dialog.message()).toContain("201 pages");
+    expect(dialog.message()).toContain("Continue anyway?");
+    await dialog.dismiss();
+  });
+  await page.locator("#convert-button").click();
+  await expect(page.locator("#error")).toContainText("Large PDF conversion cancelled.");
+  await expect(page.locator("#workspace")).toBeVisible();
+});
