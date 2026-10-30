@@ -106,6 +106,8 @@ Tests run against the production build on port 4186. They cover conversion, down
 
 An additional local TCR-paper regression test is enabled by `PAPERFORM_TEST_SOURCE` and `PAPERFORM_TEST_REFERENCE` paths. It checks author superscripts, DOI, reference page dimensions/fonts, the 12-page output, and figure/table placement. These user documents and extracted reference fonts are never included in the repository or public build.
 
+Set `PAPERFORM_TEST_CD4` to a local copy of the CD4/MHC-II lung-cancer manuscript to check separate title-page metadata and detached main/extended-data legends. A generated fixture also checks double-spaced paragraph reconstruction.
+
 Set `PAPERFORM_TEST_PLATES` to a local copy of the Liu/Baker immunogenicity preprint to check detached plates, supplementary captions, labeled front matter, complete equation crops, and math glyph coverage. This PDF is not bundled or uploaded. Set `PAPERFORM_TEST_NIH` to the local NIH-format Ruiz Cuevas manuscript to check continued summaries, manuscript furniture removal, figure legends, and resource tables.
 
 Regenerate the original sample with `npm run make:demo`.

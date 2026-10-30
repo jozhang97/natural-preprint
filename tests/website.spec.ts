@@ -927,3 +927,116 @@ test("NIH cover furniture and footnotes do not interrupt a multi-page summary", 
     /Author Manuscript|Example et al\.|available in PMC|Page 2/i,
   );
 });
+
+test("separate title pages and abbreviated extended-data legends retain structure", async ({
+  page,
+}) => {
+  const doc = await PDFDocument.create();
+  const font = await doc.embedFont(StandardFonts.Helvetica);
+  const bold = await doc.embedFont(StandardFonts.HelveticaBold);
+  const text = (
+    p: ReturnType<typeof doc.addPage>,
+    value: string,
+    y: number,
+    heading = false,
+  ) =>
+    p.drawText(value, {
+      x: 60,
+      y,
+      size: heading ? 14 : 10,
+      font: heading ? bold : font,
+    });
+  const cover = doc.addPage();
+  text(cover, "A manuscript with a separate title page", 740, true);
+  text(cover, "Ada Example and Ben Sample", 710);
+  text(cover, "1 Department of Fictional Research", 690);
+  const body = doc.addPage();
+  text(body, "Abstract", 740, true);
+  text(
+    body,
+    "This abstract belongs in the front matter of the reading copy.",
+    715,
+  );
+  text(body, "Introduction", 680, true);
+  text(
+    body,
+    "The experiment is illustrated in Figure 1 and Extended Data Fig. 1,",
+    655,
+  );
+  text(
+    body,
+    "with double-spaced source lines that should form one paragraph",
+    630,
+  );
+  text(
+    body,
+    "when the manuscript is reformatted into a compact reading copy.",
+    605,
+  );
+  for (const prefix of ["", "Extended Data "]) {
+    const plate = doc.addPage();
+    text(plate, `${prefix}Figure 1`, 740, true);
+    for (let i = 0; i < 20; i++)
+      plate.drawRectangle({ x: 60 + i * 20, y: 300, width: 10, height: 200 });
+    const legend = doc.addPage();
+    text(legend, `${prefix}Fig 1. A complete figure legend.`, 740);
+    text(legend, "The panels show the fictional experimental results.", 720);
+  }
+  await page.goto("/");
+  await page.locator("#file-input").setInputFiles({
+    name: "separate-title.pdf",
+    mimeType: "application/pdf",
+    buffer: Buffer.from(await doc.save()),
+  });
+  await page.locator("#convert-button").click();
+  await expect(page.locator("#results")).toBeVisible();
+  await page.locator("#edit-manuscript").click();
+  const m = JSON.parse(await page.locator("#manifest-editor").inputValue());
+  expect(m.metadata.authors).toBe("Ada Example and Ben Sample");
+  expect(m.metadata.abstract).toBe(
+    "This abstract belongs in the front matter of the reading copy.",
+  );
+  expect(m.metadata.affiliations).toContain("Department of Fictional Research");
+  expect(
+    m.blocks.find((b: { text: string }) => b.text.startsWith("The experiment"))
+      .text,
+  ).toContain("one paragraph when the manuscript");
+  expect(m.floats).toHaveLength(2);
+  for (const f of m.floats) {
+    expect(f.bbox[1]).toBe(0); // Panel labels above the text margin survive.
+    expect(f.caption).toContain("A complete figure legend.");
+    expect(f.caption).toContain("fictional experimental results.");
+  }
+  expect(m.blocks.map((b: { text: string }) => b.text).join(" ")).not.toMatch(
+    /Ada Example|complete figure legend/,
+  );
+});
+
+test("local CD4 manuscript groups front matter and detached figure legends", async ({
+  page,
+}) => {
+  test.skip(!process.env.PAPERFORM_TEST_CD4, "Local document is opt-in.");
+  await page.goto("/");
+  await page
+    .locator("#file-input")
+    .setInputFiles(process.env.PAPERFORM_TEST_CD4!);
+  await page.locator("#convert-button").click();
+  await expect(page.locator("#results")).toBeVisible({ timeout: 60_000 });
+  await page.locator("#edit-manuscript").click();
+  const m = JSON.parse(await page.locator("#manifest-editor").inputValue());
+  expect(m.metadata.authors).toContain("Sean-Luc Shanahan");
+  expect(m.metadata.abstract).toContain(
+    "CD4+ T cells can be either protective",
+  );
+  expect(m.metadata.abstract).toContain("therapeutic approach");
+  for (const label of [
+    "Figure 1",
+    "Figure 5",
+    "Extended Data Figure 1",
+    "Extended Data Figure 10",
+  ]) {
+    const figure = m.floats.find((f: { label: string }) => f.label === label);
+    expect(figure, label).toBeDefined();
+    expect(figure.caption.length).toBeGreaterThan(300);
+  }
+});

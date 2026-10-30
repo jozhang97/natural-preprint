@@ -38,8 +38,14 @@ type SourcePage = {
   size: [number, number];
 };
 const section =
-  /^(?:\d+[.\s]+)?(?:Abstract|Summary|Graphical Abstract|In brief|Introduction|Results|Discussion|Methods?|Main text|Materials and methods|Conclusion[s]?|References|Bibliography|Acknowledg[e]?ments|Supplementary.*|Extended data.*|Data availability|Author contributions|Competing interests|Declaration of interests|Supplemental information|Funding)\s*:?$/i;
-const caption = /^(Fig(?:ure)?\.?|Table)\s*(S?\d+)\s*[.:|]\s*/i;
+  /^(?:\d+[.\s]+)?(?:Abstract|Summary|Graphical Abstract|In brief|Introduction|Results|Discussion|Methods?|Main(?: text)?|Materials and methods|Conclusion[s]?|References|Bibliography|Acknowledg[e]?ments|Supplementary.*|Extended data.*|Data availability|Author contributions|Competing interests|Declaration of interests|Supplemental information|Funding)\s*:?$/i;
+const caption =
+  /^(?:(Extended Data|Supplementary)\s+)?(Fig(?:ure)?\.?|Table)\s*(S?\d+)\s*[.:|]\s*/i;
+const figureKey = (label: string) =>
+  label
+    .replace(/Fig(?:ure)?\.?/gi, "figure")
+    .replace(/[^a-z0-9]/gi, "")
+    .toLowerCase();
 const merge = (a: Box, b: Box): Box => [
   Math.min(a[0], b[0]),
   Math.min(a[1], b[1]),
@@ -256,7 +262,9 @@ export async function extractArticle(
         const text = clean(item.str).trim();
         const y = Util.transform(vp.transform, item.transform)[5];
         return (
-          /^(?:Fig(?:ure)?\.?|Table)\s*S?\d+$/i.test(text) &&
+          /^(?:(?:Extended Data|Supplementary)\s+)?(?:Fig(?:ure)?\.?|Table)\s*S?\d+$/i.test(
+            text,
+          ) &&
           (y <= Math.max(settings.top, preprint ? 33 : 0) ||
             rows.some((r) => r.text === text))
         );
@@ -350,7 +358,9 @@ export async function extractArticle(
           kind: /^Table/i.test(page.plateLabel) ? "table" : "figure",
           label: page.plateLabel,
           source_page: n,
-          bbox: [0, Math.max(settings.top, preprint ? 33 : 0), w, bottom],
+          // Standalone plates can place panel labels above the body-text
+          // margin. Preserve that artwork; only trim known preprint banners.
+          bbox: [0, preprint ? 33 : 0, w, bottom],
           anchor: null,
         });
         rows.forEach((r) => excluded.add(r));
@@ -551,7 +561,7 @@ export async function extractArticle(
   const allRows = pages.flatMap((p) => p.rows);
   const usedLegends = new Set<string>();
   for (const f of floats.filter((f) => f.id.startsWith("plate-"))) {
-    const key = f.label.replace(/[^a-z0-9]/gi, "").toLowerCase();
+    const key = figureKey(f.label);
     if (usedLegends.has(key)) {
       f.caption = `${f.label} (continued)`;
       continue;
@@ -561,7 +571,7 @@ export async function extractArticle(
       return (
         !excluded.has(r) &&
         match &&
-        (match[1] + match[2]).replace(/[^a-z0-9]/gi, "").toLowerCase() === key
+        figureKey(`${match[1] ?? ""} ${match[2]} ${match[3]}`) === key
       );
     });
     if (start < 0) continue;
@@ -597,8 +607,15 @@ export async function extractArticle(
       sizes.set(s, (sizes.get(s) ?? 0) + r.text.length);
     }
   const typical = [...sizes].sort((a, b) => b[1] - a[1])[0]?.[0] ?? 11;
-  const first = rows.filter((r) => r.page === 0),
-    ai = first.findIndex((r) => /^(?:Abstract|Summary)\s*:?$/i.test(r.text));
+  // A separate title page can put the abstract on page two or three.
+  const abstractIndex = rows.findIndex(
+    (r) => r.page <= 2 && /^(?:Abstract|Summary)\s*:?$/i.test(r.text),
+  );
+  const first =
+    abstractIndex >= 0
+      ? rows.slice(0, abstractIndex + 1)
+      : rows.filter((r) => r.page === 0);
+  const ai = abstractIndex >= 0 ? first.length - 1 : -1;
   const candidates = (ai > 0 ? first.slice(0, ai) : first.slice(0, 12)).filter(
     (r) =>
       !/doi|copyright|license|https?:|^(?:Title|Authors?)\s*:/i.test(r.text),
@@ -668,7 +685,7 @@ export async function extractArticle(
   // Keep the manuscript label as an abstract boundary, but do not typeset it
   // as an article heading. Named sections such as Introduction stay intact.
   const bodyStart = rows.find((r) => !excluded.has(r));
-  if (bodyStart && /^Main text\s*:?$/i.test(bodyStart.text))
+  if (bodyStart && /^Main(?: text)?\s*:?$/i.test(bodyStart.text))
     excluded.add(bodyStart);
   for (const r of rows.filter((r) => /^Graphical abstract$/i.test(r.text))) {
     const visual = floats.find(
@@ -695,6 +712,29 @@ export async function extractArticle(
     if (nextSection > briefStart)
       rows.slice(briefStart, nextSection).forEach((r) => excluded.add(r));
   }
+  // Infer normal line spacing per page: double-spaced manuscripts otherwise
+  // turn every source line into a separate, ragged paragraph.
+  const paragraphGaps = pages.map((page) => {
+    const prose = page.rows.filter(
+      (r) => !excluded.has(r) && r.text.length > 50 && !r.bold,
+    );
+    const gaps = prose
+      .slice(1)
+      .flatMap((r, i) => {
+        const previous = prose[i];
+        const gap = r.bbox[1] - previous.bbox[3];
+        return Math.abs(r.bbox[0] - previous.bbox[0]) < 5 &&
+          gap >= 0 &&
+          gap < typical * 2
+          ? [gap]
+          : [];
+      })
+      .sort((a, b) => a - b);
+    return Math.max(
+      typical * 0.7,
+      (gaps[Math.floor(gaps.length / 2)] ?? 0) * 1.5,
+    );
+  });
   const blocks: Block[] = [];
   let prev: Row | undefined;
   for (const r of rows.filter((r) => !excluded.has(r))) {
@@ -723,7 +763,10 @@ export async function extractArticle(
       numbered ||
       (kind !== "equation" &&
         r.page === prev.page &&
-        (r.bbox[1] - prev.bbox[3] > typical * 0.7 ||
+        (r.bbox[1] - prev.bbox[3] > paragraphGaps[r.page] ||
+          (paragraphGaps[r.page] > typical * 0.7 &&
+            /[.!?][\d,–-]*$/.test(prev.text) &&
+            prev.bbox[2] < r.bbox[2] - typical * 3) ||
           r.bbox[0] - prev.bbox[0] > 18)) ||
       (r.page !== prev.page && /[.!?:]$/.test(prev.text));
     if (start)
@@ -820,7 +863,7 @@ export async function extractArticle(
     const num = f.label.match(/(?:Fig(?:ure)?\.?|Table)\s*(S?\d+)/i)?.[1];
     if (num) {
       const regex = new RegExp(
-        `\\b${f.kind === "table" ? "Table" : "Fig(?:ure)?\\.?"}\\s*${num}(?!\\d)`,
+        `\\b${/^Extended Data/i.test(f.label) ? "Extended\\s+Data\\s+" : /^Supplementary/i.test(f.label) ? "Supplementary\\s+" : ""}${f.kind === "table" ? "Table" : "Fig(?:ure)?\\.?"}\\s*${num}(?!\\d)`,
         "i",
       );
       f.anchor = blocks.find((b) => regex.test(b.text))?.id ?? null;
