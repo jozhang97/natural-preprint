@@ -686,6 +686,15 @@ export async function extractArticle(
       excluded.add(r);
     }
   }
+  // Publisher summaries duplicate the abstract in this reading layout.
+  const briefStart = rows.findIndex((r) => /^In brief\s*:?$/i.test(r.text));
+  if (briefStart >= 0) {
+    const nextSection = rows.findIndex(
+      (r, i) => i > briefStart && section.test(r.text),
+    );
+    if (nextSection > briefStart)
+      rows.slice(briefStart, nextSection).forEach((r) => excluded.add(r));
+  }
   const blocks: Block[] = [];
   let prev: Row | undefined;
   for (const r of rows.filter((r) => !excluded.has(r))) {
@@ -694,10 +703,10 @@ export async function extractArticle(
       r.size > typical * 1.2 ||
       (r.bold && r.text.length < 160)
         ? "heading"
-        : r.pieces.some((p) => /math|cmmi|cmsy|cmex/i.test(p.font)) &&
+        : r.pieces.some((p) => /math|cmmi|cmsy|cmex|stix/i.test(p.font)) &&
             r.pieces.every(
               (p) =>
-                /math|cmmi|cmsy|cmex/i.test(p.font) ||
+                /math|cmmi|cmsy|cmex|stix/i.test(p.font) ||
                 !/[a-z]{3,}/i.test(p.text),
             )
           ? "equation"
@@ -737,21 +746,61 @@ export async function extractArticle(
   if (settings.preserveVisuals)
     for (const b of blocks)
       if (b.kind === "equation") {
-        const [w, h] = pages[b.source_pages[0]].size;
+        const source = pages[b.source_pages[0]];
+        const [w, h] = source.size;
+        let bounds: Box = [...b.bbox];
+        // Include drawn fraction bars and delimiters beside the math text.
+        for (const drawing of source.drawings)
+          if (
+            inside(drawing, [
+              b.bbox[0] - 5,
+              b.bbox[1] - 5,
+              b.bbox[2] + 5,
+              b.bbox[3] + 5,
+            ])
+          )
+            bounds = merge(bounds, drawing);
         floats.push({
           id: `eq-${b.id}`,
           kind: "equation",
           label: "Displayed equation",
           source_page: b.source_pages[0],
           bbox: [
-            Math.max(0, b.bbox[0] - 3),
-            Math.max(0, b.bbox[1] - 1),
-            Math.min(w, b.bbox[2] + 3),
-            Math.min(h, b.bbox[3] + 1),
+            Math.max(0, bounds[0] - 3),
+            Math.max(0, bounds[1] - 1),
+            Math.min(w, bounds[2] + 3),
+            Math.min(h, bounds[3] + 1),
           ],
           anchor: b.id,
         });
       }
+  // A fallback page is redundant once every non-margin drawing is retained
+  // in an equation crop. Keep the fallback if any artwork remains unexplained.
+  for (let i = floats.length - 1; i >= 0; i--) {
+    const f = floats[i];
+    if (f.kind !== "source-page") continue;
+    const source = pages[f.source_page];
+    const equations = floats.filter(
+      (v) => v.kind === "equation" && v.source_page === f.source_page,
+    );
+    const drawings = source.drawings.filter(
+      (b) =>
+        b[0] >= (nihManuscript ? 40 : 0) &&
+        b[1] >= (nihManuscript ? 55 : settings.top) &&
+        b[3] <= source.size[1] - (nihManuscript ? 90 : settings.bottom),
+    );
+    if (
+      equations.length &&
+      drawings.length &&
+      drawings.every((b) => equations.some((e) => inside(b, e.bbox)))
+    ) {
+      floats.splice(i, 1);
+      const warning = warnings.indexOf(
+        `Source page ${f.source_page + 1} has complex vector content retained in the visual appendix; check its extraction.`,
+      );
+      if (warning >= 0) warnings.splice(warning, 1);
+    }
+  }
   const splitRows = rows.filter(
     (r) =>
       !excluded.has(r) &&

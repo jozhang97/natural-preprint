@@ -799,6 +799,15 @@ test("local NIH manuscript keeps its summary, captions, and resource tables", as
   expect(body).toContain("Conceptualization");
   expect(body).toContain("The authors declare no competing interests");
   expect(body).not.toContain("Graphical Abstract");
+  expect(body).not.toContain("In brief");
+  expect(body).not.toContain("Ruiz Cuevas et al. describe");
+  expect(m.blocks[0].text).toBe("INTRODUCTION");
+  expect(
+    m.floats.filter((f: { kind: string }) => f.kind === "equation"),
+  ).toHaveLength(4);
+  expect(m.floats.some((f: { kind: string }) => f.kind === "source-page")).toBe(
+    false,
+  );
   expect(
     m.floats.find((f: { label: string }) => f.label === "Graphical Abstract")
       .caption,
@@ -867,6 +876,8 @@ test("NIH cover furniture and footnotes do not interrupt a multi-page summary", 
     "onto a second page without any publication furniture mixed into the abstract.",
     720,
   );
+  text(second, "In brief", 705, 11, true);
+  text(second, "A redundant publisher summary of the findings.", 692);
   text(second, "INTRODUCTION", 680, 11, true);
   text(
     second,
@@ -893,13 +904,11 @@ test("NIH cover furniture and footnotes do not interrupt a multi-page summary", 
     rotate: degrees(-90),
   });
   await page.goto("/");
-  await page
-    .locator("#file-input")
-    .setInputFiles({
-      name: "nih-fixture.pdf",
-      mimeType: "application/pdf",
-      buffer: Buffer.from(await doc.save()),
-    });
+  await page.locator("#file-input").setInputFiles({
+    name: "nih-fixture.pdf",
+    mimeType: "application/pdf",
+    buffer: Buffer.from(await doc.save()),
+  });
   await page.locator("#convert-button").click();
   await expect(page.locator("#results")).toBeVisible();
   await page.locator("#edit-manuscript").click();
@@ -912,6 +921,8 @@ test("NIH cover furniture and footnotes do not interrupt a multi-page summary", 
   expect(m.metadata.affiliations).toContain("ada@example.org");
   const body = m.blocks.map((b: { text: string }) => b.text).join(" ");
   expect(body).toContain("Both authors designed");
+  expect(body).not.toContain("In brief");
+  expect(body).not.toContain("redundant publisher summary");
   expect(body).not.toMatch(
     /Author Manuscript|Example et al\.|available in PMC|Page 2/i,
   );
