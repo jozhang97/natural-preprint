@@ -48,11 +48,11 @@ Run `npm run test:analytics` to check configuration gating, event payloads, and 
 ## Features
 
 - Local PDFs and direct HTTPS PDF links that permit cross-origin requests.
-- Positioned-text extraction with PDF.js; inferred paragraphs, headings, captions, and basic styles.
+- Positioned-text extraction with PDF.js; inferred paragraphs, headings, captions, and basic styles. Labeled front matter (including `Title:`, `Authors:`, `Abstract:`, and `SUMMARY`) is recognized. NIH author manuscripts omit cover banners and repeated manuscript furniture, retain summaries across page breaks, and keep first-page correspondence and contribution notes separate.
 - Compact journal-style pages (595.276 × 790.866 points by default), justified 8.25-point body text, and narrow two-column gutters.
 - A structured first page: title, DOI/date sidebar, authors, abstract, and affiliation footnotes.
 - Figures and tables embed cropped source PDF content directly, retaining vector paths, text, and original image resolution without rasterizing or downsampling.
-- Full-width figure plates with balanced two-column captions, scheduled using their first citations. Captions continuing onto another source page stay with their figure. Tables are cropped separately, including their borders and notes.
+- Full-width figure plates with balanced two-column captions, scheduled using their first citations. Standalone labeled plates retain their panels and annotations together and match separately collected legends, including supplementary figures and tables. Captions continuing onto another source page stay with their figure. Tables are cropped separately, including their borders and notes.
 - Local typography-reference PDFs for embedded Harding/Graphik fonts and page dimensions; bundled Noto fonts remain the fallback.
 - Source-page visual appendices for uncertain artwork and pages with little selectable text.
 - Original/result previews, processing stages, cancellation, extraction notes, and text checks.
@@ -76,7 +76,7 @@ This is an assisted reading tool, not a lossless PDF parser or journal submissio
 - Links: the source must permit browser access through CORS. There is no proxy to bypass CORS, authentication, or paywalls. Article landing pages are unsupported. Download and select the PDF locally if a link fails.
 - Text: reading order, paragraph boundaries, and styles are inferred. Multi-column sources, unusual encodings, and mathematical notation need review. Missing font glyphs are flagged and replaced visibly.
 - Visuals: figure/table crops are removed from the body stream to avoid duplication. Uncertain artwork is preserved as source-page crops; on those fallback pages, extracted text also remains in the article. Detection is heuristic and does not guarantee complete coverage.
-- Fonts: redistributable Noto Serif and Noto symbol fonts are bundled. Reference fonts are used only in the local session, not copied into the website. Crops are rendered at up to 144 DPI, with a maximum 1,800-pixel longest edge.
+- Fonts: redistributable Noto Serif, Noto symbol, and Noto Sans Math fonts are bundled. Reference fonts are used only in the local session, not copied into the website. Crops are rendered at up to 144 DPI, with a maximum 1,800-pixel longest edge.
 - Reports: normalized manuscript text excerpts are compared against output text, ignoring whitespace and hyphens. Page/column breaks can cause false mismatches. This does not prove complete source extraction or correct layout.
 
 Default margin trimming excludes 33 PDF points at the top and 20 at the bottom. Recognized bioRxiv/medRxiv banners are excluded automatically. Adjust **Layout preferences** for larger banners or content near page edges.
@@ -106,6 +106,8 @@ Tests run against the production build on port 4186. They cover conversion, down
 
 An additional local TCR-paper regression test is enabled by `PAPERFORM_TEST_SOURCE` and `PAPERFORM_TEST_REFERENCE` paths. It checks author superscripts, DOI, reference page dimensions/fonts, the 12-page output, and figure/table placement. These user documents and extracted reference fonts are never included in the repository or public build.
 
+Set `PAPERFORM_TEST_PLATES` to a local copy of the Liu/Baker immunogenicity preprint to check detached plates, supplementary captions, labeled front matter, complete equation crops, and math glyph coverage. This PDF is not bundled or uploaded. Set `PAPERFORM_TEST_NIH` to the local NIH-format Ruiz Cuevas manuscript to check continued summaries, manuscript furniture removal, figure legends, and resource tables.
+
 Regenerate the original sample with `npm run make:demo`.
 
 ## Code map
@@ -131,4 +133,4 @@ python paper_reformat.py convert paper.pdf -o formatted.pdf --reference nature-e
 
 ## Assets and licenses
 
-Noto fonts use the SIL Open Font License, included in `public/fonts/OFL.txt`. PDF.js (Apache-2.0), pdf-lib (MIT), and fontkit licenses are included in their npm packages. Decorative paper illustrations are HTML/CSS/SVG. The original sample PDF and its text were created for this project.
+Noto fonts use the SIL Open Font License, included in `public/fonts/OFL.txt` and `public/fonts/NotoSansMath-OFL.txt`. Noto Sans Math is sourced from the Google Fonts `ofl/notosansmath` distribution. PDF.js (Apache-2.0), pdf-lib (MIT), and fontkit licenses are included in their npm packages. Decorative paper illustrations are HTML/CSS/SVG. The original sample PDF and its text were created for this project.

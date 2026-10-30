@@ -598,7 +598,9 @@ test("local TCR source matches the supplied article reference structure", async 
   ).toContain("Docking geometry");
 });
 
-test("large local PDFs can be declined or selected after confirmation", async ({ page }) => {
+test("large local PDFs can be declined or selected after confirmation", async ({
+  page,
+}) => {
   await page.goto("/");
   for (const accept of [false, true]) {
     page.once("dialog", async (dialog) => {
@@ -607,7 +609,9 @@ test("large local PDFs can be declined or selected after confirmation", async ({
       else await dialog.dismiss();
     });
     await page.evaluate(() => {
-      const file = new File(["%PDF-"], "large.pdf", { type: "application/pdf" });
+      const file = new File(["%PDF-"], "large.pdf", {
+        type: "application/pdf",
+      });
       Object.defineProperty(file, "size", { value: 101 * 1024 * 1024 });
       const transfer = new DataTransfer();
       transfer.items.add(file);
@@ -615,8 +619,12 @@ test("large local PDFs can be declined or selected after confirmation", async ({
       input.files = transfer.files;
       input.dispatchEvent(new Event("change"));
     });
-    if (accept) await expect(page.locator("#file-name")).toHaveText("large.pdf");
-    else await expect(page.locator("#file-name")).toHaveText("Drop your paper here");
+    if (accept)
+      await expect(page.locator("#file-name")).toHaveText("large.pdf");
+    else
+      await expect(page.locator("#file-name")).toHaveText(
+        "Drop your paper here",
+      );
   }
 });
 
@@ -625,7 +633,9 @@ test("source PDFs above 200 pages ask before extraction", async ({ page }) => {
   for (let i = 0; i < 201; i++) pdf.addPage();
   await page.goto("/");
   await page.locator("#file-input").setInputFiles({
-    name: "long.pdf", mimeType: "application/pdf", buffer: Buffer.from(await pdf.save()),
+    name: "long.pdf",
+    mimeType: "application/pdf",
+    buffer: Buffer.from(await pdf.save()),
   });
   page.once("dialog", async (dialog) => {
     expect(dialog.message()).toContain("201 pages");
@@ -633,6 +643,276 @@ test("source PDFs above 200 pages ask before extraction", async ({ page }) => {
     await dialog.dismiss();
   });
   await page.locator("#convert-button").click();
-  await expect(page.locator("#error")).toContainText("Large PDF conversion cancelled.");
+  await expect(page.locator("#error")).toContainText(
+    "Large PDF conversion cancelled.",
+  );
   await expect(page.locator("#workspace")).toBeVisible();
+});
+
+test("labeled front matter and detached supplementary figure plates stay intact", async ({
+  page,
+}) => {
+  const doc = await PDFDocument.create();
+  const font = await doc.embedFont(StandardFonts.Helvetica);
+  const bold = await doc.embedFont(StandardFonts.HelveticaBold);
+  const first = doc.addPage([612, 792]);
+  const line = (text: string, y: number, heading = false) =>
+    first.drawText(text, { x: 40, y, size: 11, font: heading ? bold : font });
+  line("Title:", 720, true);
+  line("Function-preserving protein design", 704, true);
+  line("Authors:", 680, true);
+  line("Ada Example, Ben Sample", 664);
+  line("1. Department of Example Science", 640);
+  line("Abstract:", 610, true);
+  line(
+    "This fictional abstract describes a design experiment and its measured outcomes.",
+    590,
+  );
+  line("Main text:", 555, true);
+  line(
+    "Figure S1 shows the complete experiment, including the annotated panels.",
+    535,
+  );
+  line(
+    "Figure 1 is cited separately and must not capture supplementary figures.",
+    519,
+  );
+  line("Figure S1. A detached legend for a composite figure.", 470, true);
+  line("Both panels and their vector annotations must remain together.", 454);
+  line("Methods:", 420, true);
+  line(
+    "The experiment used a fictional set of measurements for this regression fixture.",
+    400,
+  );
+  const plate = doc.addPage([612, 792]);
+  plate.drawText("Figure S1", { x: 5, y: 775, size: 10, font: bold });
+  const png = await doc.embedPng(
+    Buffer.from(
+      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Y9Zl1sAAAAASUVORK5CYII=",
+      "base64",
+    ),
+  );
+  plate.drawImage(png, { x: 40, y: 480, width: 230, height: 210 });
+  plate.drawImage(png, { x: 310, y: 480, width: 230, height: 210 });
+  plate.drawText("A", { x: 30, y: 710, size: 12, font: bold });
+  plate.drawText("B", { x: 300, y: 710, size: 12, font: bold });
+  await page.goto("/");
+  await page.locator("#file-input").setInputFiles({
+    name: "plates.pdf",
+    mimeType: "application/pdf",
+    buffer: Buffer.from(await doc.save()),
+  });
+  await page.locator("#convert-button").click();
+  await expect(page.locator("#results")).toBeVisible();
+  await page.locator("#edit-manuscript").click();
+  const m = JSON.parse(await page.locator("#manifest-editor").inputValue());
+  expect(m.metadata.title).toBe("Function-preserving protein design");
+  expect(m.metadata.authors).toBe("Ada Example, Ben Sample");
+  expect(m.metadata.abstract).toMatch(/^This fictional abstract/);
+  expect(m.metadata.abstract).not.toContain("Main text");
+  expect(m.blocks[0].text).toMatch(/^Figure S1 shows/);
+  expect(m.metadata.affiliations).toContain("1. Department");
+  expect(m.floats).toHaveLength(1);
+  expect(m.floats[0].label).toBe("Figure S1");
+  expect(m.floats[0].caption).toContain("Both panels");
+  expect(m.floats[0].caption).not.toContain("Methods");
+  expect(m.floats[0].bbox[0]).toBeLessThan(40);
+  expect(m.floats[0].bbox[2]).toBeGreaterThan(540);
+  expect(
+    m.blocks.find((b: { id: string }) => b.id === m.floats[0].anchor).text,
+  ).toMatch(/^Figure S1 shows/);
+  expect(
+    m.blocks.some(
+      (b: { text: string }) =>
+        b.text.includes("detached legend") || b.text === "A B",
+    ),
+  ).toBe(false);
+});
+
+test("local detached-plate paper preserves front matter, captions, and math glyphs", async ({
+  page,
+}) => {
+  test.skip(!process.env.PAPERFORM_TEST_PLATES, "Local document is opt-in.");
+  await page.goto("/");
+  await page
+    .locator("#file-input")
+    .setInputFiles(process.env.PAPERFORM_TEST_PLATES!);
+  await page.locator("#convert-button").click();
+  await expect(page.locator("#results")).toBeVisible({ timeout: 90000 });
+  await page.locator("#edit-manuscript").click();
+  const m = JSON.parse(await page.locator("#manifest-editor").inputValue());
+  expect(m.metadata.title).toMatch(/^Function-preserving CD8/);
+  expect(m.metadata.authors).toContain("Bingxu Liu");
+  expect(m.metadata.abstract).toMatch(/^Rapid advances/);
+  const plates = m.floats.filter((f: { id: string }) =>
+    f.id.startsWith("plate-"),
+  );
+  expect(plates).toHaveLength(7);
+  const equations = m.floats.filter(
+    (f: { kind: string }) => f.kind === "equation",
+  );
+  expect(equations).toHaveLength(3);
+  expect(equations.every((f: { bbox: number[] }) => f.bbox[0] < 72)).toBe(true);
+  expect(equations[2].bbox[3] - equations[2].bbox[1]).toBeGreaterThan(40);
+  expect(
+    plates.find((f: { label: string }) => f.label === "Figure 2").caption,
+  ).toContain("Cross-reactivity");
+  expect(
+    m.blocks.every((b: { source_pages: number[] }) =>
+      b.source_pages.every((n) => n < 17),
+    ),
+  ).toBe(true);
+  await page.locator("#close-editor").click();
+  const event = page.waitForEvent("download");
+  await page.locator("#download-report").click();
+  const report = JSON.parse(
+    await readFile((await (await event).path())!, "utf8"),
+  );
+  expect(report.missing_glyphs).toEqual([]);
+});
+
+test("local NIH manuscript keeps its summary, captions, and resource tables", async ({
+  page,
+}) => {
+  test.skip(!process.env.PAPERFORM_TEST_NIH, "Local document is opt-in.");
+  await page.goto("/");
+  await page
+    .locator("#file-input")
+    .setInputFiles(process.env.PAPERFORM_TEST_NIH!);
+  await page.locator("#convert-button").click();
+  await expect(page.locator("#results")).toBeVisible({ timeout: 90000 });
+  await page.locator("#edit-manuscript").click();
+  const m = JSON.parse(await page.locator("#manifest-editor").inputValue());
+  expect(m.metadata.title).toBe(
+    "Most non-canonical proteins uniquely populate the proteome or immunopeptidome",
+  );
+  expect(m.metadata.authors).toMatch(/^Maria Virginia Ruiz Cuevas/);
+  expect(m.metadata.authors).toContain("Yewdell");
+  expect(m.metadata.abstract).toMatch(/^Combining RNA sequencing/);
+  expect(m.metadata.abstract).toMatch(/class I pathway\.$/);
+  expect(m.metadata.abstract).not.toContain("CONTRIBUTIONS");
+  expect(m.metadata.affiliations).toContain("Correspondence:");
+  const body = m.blocks.map((b: { text: string }) => b.text).join(" ");
+  expect(body).not.toMatch(
+    /Author Manuscript|Cell Rep\. Author manuscript|Cuevas et al\. Page/,
+  );
+  expect(body).toContain("Conceptualization");
+  expect(body).toContain("The authors declare no competing interests");
+  expect(body).not.toContain("Graphical Abstract");
+  expect(
+    m.floats.find((f: { label: string }) => f.label === "Graphical Abstract")
+      .caption,
+  ).toBe("Graphical Abstract");
+  const figures = m.floats.filter((f: { label: string }) =>
+    /^Figure \d+$/.test(f.label),
+  );
+  expect(figures).toHaveLength(6);
+  expect(
+    figures.find((f: { label: string }) => f.label === "Figure 2").caption,
+  ).toContain("genomic location");
+  expect(
+    figures.every(
+      (f: { caption: string }) => !/Author Manuscript|Page \d+/.test(f.caption),
+    ),
+  ).toBe(true);
+  expect(
+    m.floats.filter((f: { id: string }) => f.id.startsWith("resources-")),
+  ).toHaveLength(2);
+  expect(
+    m.blocks.every((b: { source_pages: number[] }) =>
+      b.source_pages.every((n) => n < 38),
+    ),
+  ).toBe(true);
+});
+
+test("NIH cover furniture and footnotes do not interrupt a multi-page summary", async ({
+  page,
+}) => {
+  const doc = await PDFDocument.create();
+  const font = await doc.embedFont(StandardFonts.Helvetica);
+  const bold = await doc.embedFont(StandardFonts.HelveticaBold);
+  const first = doc.addPage([612, 792]);
+  const text = (
+    p: ReturnType<typeof doc.addPage>,
+    value: string,
+    y: number,
+    size = 10,
+    heading = false,
+  ) => p.drawText(value, { x: 90, y, size, font: heading ? bold : font });
+  text(first, "HHS Public Access", 760, 24, true);
+  text(first, "Author manuscript", 740, 16);
+  text(first, "Published in final edited form as:", 710);
+  text(first, "A study with a continued summary", 650, 14, true);
+  text(first, "Ada Example, Ben Sample", 620);
+  text(first, "1 Department of Example Research", 595);
+  text(first, "SUMMARY", 560, 11, true);
+  text(
+    first,
+    "The first part of this summary describes a fictional study whose results continue",
+    540,
+  );
+  text(first, "*Correspondence: ada@example.org", 150, 8);
+  text(first, "AUTHOR CONTRIBUTIONS", 135, 8);
+  text(
+    first,
+    "Both authors designed this fictional study and reviewed its conclusions.",
+    120,
+    8,
+  );
+  const second = doc.addPage([612, 792]);
+  text(second, "Example et al.", 750, 8);
+  text(second, "Page 2", 739, 8);
+  text(
+    second,
+    "onto a second page without any publication furniture mixed into the abstract.",
+    720,
+  );
+  text(second, "INTRODUCTION", 680, 11, true);
+  text(
+    second,
+    "The article begins with background and describes the experiment in detail.",
+    660,
+  );
+  text(second, "REFERENCES", 620, 11, true);
+  text(
+    second,
+    "Example A. A fictional reference for this original regression fixture.",
+    600,
+  );
+  text(
+    second,
+    "Cell Rep. Author manuscript; available in PMC 2021 April 12.",
+    70,
+    8,
+  );
+  second.drawText("Author Manuscript", {
+    x: 20,
+    y: 600,
+    size: 12,
+    font,
+    rotate: degrees(-90),
+  });
+  await page.goto("/");
+  await page
+    .locator("#file-input")
+    .setInputFiles({
+      name: "nih-fixture.pdf",
+      mimeType: "application/pdf",
+      buffer: Buffer.from(await doc.save()),
+    });
+  await page.locator("#convert-button").click();
+  await expect(page.locator("#results")).toBeVisible();
+  await page.locator("#edit-manuscript").click();
+  const m = JSON.parse(await page.locator("#manifest-editor").inputValue());
+  expect(m.metadata.title).toBe("A study with a continued summary");
+  expect(m.metadata.abstract).toMatch(/results continue onto a second page/);
+  expect(m.metadata.abstract).not.toMatch(
+    /Correspondence|CONTRIBUTIONS|Author manuscript|Page 2/i,
+  );
+  expect(m.metadata.affiliations).toContain("ada@example.org");
+  const body = m.blocks.map((b: { text: string }) => b.text).join(" ");
+  expect(body).toContain("Both authors designed");
+  expect(body).not.toMatch(
+    /Author Manuscript|Example et al\.|available in PMC|Page 2/i,
+  );
 });

@@ -19,6 +19,7 @@ function fonts(signal: AbortSignal): Promise<ArrayBuffer[]> {
       "NotoSerif-BoldItalic",
       "NotoSansSymbols2-Regular",
       "NotoSansSymbols-Regular",
+      "NotoSansMath-Regular",
     ].map(async (style) => {
       const res = await fetch(`${import.meta.env.BASE_URL}fonts/${style}.ttf`, {
         signal,

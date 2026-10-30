@@ -319,7 +319,10 @@ self.onmessage = async ({ data }: MessageEvent<Input>) => {
         7,
       );
       const capHeight = Math.ceil(captionLines.length / 2) * 9;
-      const maxHeight = Math.min(460, H - 120 - capHeight);
+      const maxHeight = Math.min(
+        f.kind === "table" ? H - 120 : 460,
+        H - 120 - capHeight,
+      );
       return (
         Math.min(full / a.asset.width, maxHeight / a.asset.height) *
           a.asset.height +
@@ -341,7 +344,10 @@ self.onmessage = async ({ data }: MessageEvent<Input>) => {
         ),
         split = Math.ceil(lines.length / 2);
       const capHeight = split * 9,
-        maxHeight = Math.min(460, H - 120 - capHeight),
+        maxHeight = Math.min(
+          f.kind === "table" ? H - 120 : 460,
+          H - 120 - capHeight,
+        ),
         scale = Math.min(
           full / data.asset.width,
           maxHeight / data.asset.height,
@@ -493,7 +499,9 @@ self.onmessage = async ({ data }: MessageEvent<Input>) => {
       const details = [
         m.metadata.doi ? `doi: ${m.metadata.doi}` : "",
         m.metadata.posted ? `Posted: ${m.metadata.posted}` : "",
-        m.metadata.preprint ? "bioRxiv preprint" : "Reformatted Natural Preprint",
+        m.metadata.preprint
+          ? "bioRxiv preprint"
+          : "Reformatted Natural Preprint",
         m.metadata.preprint ? "Not peer reviewed" : "",
       ];
       for (const [i, s] of details.entries())
@@ -567,7 +575,13 @@ self.onmessage = async ({ data }: MessageEvent<Input>) => {
       if (ey - h < (ep === 1 ? firstFloor : 45)) eAdvance();
     };
     for (const b of m.blocks) {
-      if (/^(references|bibliography)$/i.test(b.text.trim())) refs = true;
+      if (
+        b.kind === "heading" &&
+        /^(references|bibliography|methods?|materials and methods)\s*:?$/i.test(
+          b.text.trim(),
+        )
+      )
+        refs = /^(references|bibliography)/i.test(b.text.trim());
       const heading = b.kind === "heading",
         size = heading ? 9.75 : refs ? 6.3 : settings.bodySize;
       const lead = heading ? 10.5 : refs ? 8 : size * (10.75 / 8.25);
@@ -654,7 +668,13 @@ self.onmessage = async ({ data }: MessageEvent<Input>) => {
         drawn.add(eq.id);
         continue;
       }
-      if (/^(references|bibliography)$/i.test(b.text.trim())) references = true;
+      if (
+        b.kind === "heading" &&
+        /^(references|bibliography|methods?|materials and methods)\s*:?$/i.test(
+          b.text.trim(),
+        )
+      )
+        references = /^(references|bibliography)/i.test(b.text.trim());
       body(
         b.spans,
         b.kind === "heading" ? 9.75 : references ? 6.3 : settings.bodySize,

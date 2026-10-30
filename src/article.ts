@@ -34,11 +34,12 @@ type SourcePage = {
   images: Box[];
   drawings: Box[];
   paths: number;
+  plateLabel?: string;
   size: [number, number];
 };
 const section =
-  /^(?:\d+[.\s]+)?(?:Abstract|Introduction|Results|Discussion|Methods|Materials and methods|Conclusion[s]?|References|Bibliography|Acknowledg[e]?ments|Supplementary.*|Extended data.*|Data availability|Author contributions|Competing interests|Funding)$/i;
-const caption = /^(Fig(?:ure)?\.?|Table)\s*(\d+)\s*[.:|]\s*/i;
+  /^(?:\d+[.\s]+)?(?:Abstract|Summary|Graphical Abstract|In brief|Introduction|Results|Discussion|Methods?|Main text|Materials and methods|Conclusion[s]?|References|Bibliography|Acknowledg[e]?ments|Supplementary.*|Extended data.*|Data availability|Author contributions|Competing interests|Declaration of interests|Supplemental information|Funding)\s*:?$/i;
+const caption = /^(Fig(?:ure)?\.?|Table)\s*(S?\d+)\s*[.:|]\s*/i;
 const merge = (a: Box, b: Box): Box => [
   Math.min(a[0], b[0]),
   Math.min(a[1], b[1]),
@@ -137,7 +138,8 @@ export async function extractArticle(
     warnings: string[] = [],
     floats: Figure[] = [];
   let firstRaw = "",
-    preprint = false;
+    preprint = false,
+    nihManuscript = false;
   for (let n = 0; n < doc.numPages; n++) {
     signal.throwIfAborted();
     progress(
@@ -158,6 +160,9 @@ export async function extractArticle(
     if (n === 0) {
       firstRaw = items.map((i) => i.str).join(" ");
       preprint = /bioRxiv|medRxiv/i.test(firstRaw);
+      nihManuscript =
+        /HHS Public Access/i.test(firstRaw) &&
+        /Author manuscript/i.test(firstRaw);
     }
     const pieces: Piece[] = items
       .map((item) => {
@@ -178,7 +183,15 @@ export async function extractArticle(
         (p) =>
           p.y - p.size >= Math.max(settings.top, preprint ? 33 : 0) &&
           p.y <= vp.height - settings.bottom &&
-          !(p.x < 28 && /^\d+$/.test(p.text.trim())),
+          !(p.x < 28 && /^\d+$/.test(p.text.trim())) &&
+          !(
+            nihManuscript &&
+            (/^Author manuscript$/i.test(p.text.trim()) ||
+              (n === 0 && p.y < 115) ||
+              (n > 0 && p.y < 55 && /et al\.|^Page\s*\d+/i.test(p.text)) ||
+              (p.y > vp.height - 90 &&
+                /Author manuscript; available in PMC/i.test(p.text)))
+          ),
       );
     const rows = makeRows(pieces, n).filter(
       (r) => !(/^\d+$/.test(r.text) && r.bbox[1] > vp.height - 60),
@@ -238,7 +251,25 @@ export async function extractArticle(
         if (b[2] - b[0] > 90 && b[3] - b[1] > 45) images.push(b);
       }
     }
-    pages.push({ rows, images, drawings, paths, size: [vp.width, vp.height] });
+    const plateLabel = items
+      .find((item) => {
+        const text = clean(item.str).trim();
+        const y = Util.transform(vp.transform, item.transform)[5];
+        return (
+          /^(?:Fig(?:ure)?\.?|Table)\s*S?\d+$/i.test(text) &&
+          (y <= Math.max(settings.top, preprint ? 33 : 0) ||
+            rows.some((r) => r.text === text))
+        );
+      })
+      ?.str.trim();
+    pages.push({
+      rows,
+      images,
+      drawings,
+      paths,
+      plateLabel,
+      size: [vp.width, vp.height],
+    });
     page.cleanup();
     await pause();
   }
@@ -253,6 +284,14 @@ export async function extractArticle(
     throw new Error(
       "This document contains too much text for browser conversion. Use a shorter PDF.",
     );
+  const frontNotes: Row[] = [];
+  if (nihManuscript) {
+    const first = pages[0].rows;
+    const noteStart = first.findIndex((r) =>
+      /^\*?Correspondence:/i.test(r.text),
+    );
+    if (noteStart >= 0) frontNotes.push(...first.splice(noteStart));
+  }
   const excluded = new Set<Row>();
   if (settings.preserveVisuals)
     for (let n = 0; n < pages.length; n++) {
@@ -262,6 +301,61 @@ export async function extractArticle(
           images,
           size: [w, h],
         } = page;
+      const resourceHeading = rows.find((r) =>
+        /^KEY RESOURCES TABLE$/i.test(r.text),
+      );
+      const resourceColumns = rows.find((r) =>
+        /REAGENT or RESOURCE.*SOURCE.*IDENTIFIER/i.test(r.text),
+      );
+      if (resourceColumns && page.paths > 12) {
+        const bounds = rows.reduce((b, r) => merge(b, r.bbox), rows[0].bbox);
+        floats.push({
+          id: `resources-${n}`,
+          kind: "table",
+          label: resourceHeading
+            ? "Key resources table"
+            : "Key resources table (continued)",
+          source_page: n,
+          bbox: [
+            Math.max(0, bounds[0] - 3),
+            Math.max(0, bounds[1] - 3),
+            Math.min(w, bounds[2] + 3),
+            Math.min(h, bounds[3] + 3),
+          ],
+          anchor: null,
+        });
+        rows.forEach((r) => excluded.add(r));
+        continue;
+      }
+      // Standalone labels identify complete figure/table plates, including
+      // labels in the trimmed header. Keep all panels and vector annotations
+      // together instead of treating each embedded bitmap as a separate figure.
+      if (
+        page.plateLabel &&
+        (images.length || page.paths > 15) &&
+        !rows.some(
+          (r) => r.text.length > 180 && !/^Table/i.test(page.plateLabel!),
+        )
+      ) {
+        const bottom = Math.min(
+          h - settings.bottom,
+          Math.max(
+            ...rows.map((r) => r.bbox[3]),
+            ...images.map((b) => b[3]),
+            80,
+          ) + 5,
+        );
+        floats.push({
+          id: `plate-${n}`,
+          kind: /^Table/i.test(page.plateLabel) ? "table" : "figure",
+          label: page.plateLabel,
+          source_page: n,
+          bbox: [0, Math.max(settings.top, preprint ? 33 : 0), w, bottom],
+          anchor: null,
+        });
+        rows.forEach((r) => excluded.add(r));
+        continue;
+      }
       const tables = rows.filter((r) => /^Table\s*\d+\s*[.:|]/i.test(r.text));
       if (tables.length && page.paths > 12) {
         for (let i = 0; i < tables.length; i++) {
@@ -328,7 +422,7 @@ export async function extractArticle(
             if (
               j < rr.length ||
               !rr.length ||
-              rr.at(-1)!.bbox[3] < pages[pn].size[1] - 85
+              rr.at(-1)!.bbox[3] < pages[pn].size[1] * 0.75
             )
               break;
             pn++;
@@ -336,7 +430,8 @@ export async function extractArticle(
             if (
               !pages[pn] ||
               pages[pn].images.length ||
-              pages[pn].rows[0]?.bbox[1] > 85
+              pages[pn].rows[0]?.bbox[1] > 85 ||
+              Math.abs((pages[pn].rows[0]?.bbox[0] ?? 0) - cap.bbox[0]) > 25
             )
               break;
           }
@@ -358,7 +453,7 @@ export async function extractArticle(
           caption_spans: spans,
         });
       }
-      if (!images.length && page.paths > 15) {
+      if (!images.length && page.paths > 15 && !(nihManuscript && n === 0)) {
         const cap = rows.find(
           (r) => caption.test(r.text) && r.bbox[1] > h * 0.3,
         );
@@ -451,7 +546,50 @@ export async function extractArticle(
     warnings.push(
       "Visual preservation was disabled. Figures and non-text content may be absent.",
     );
+  // Some manuscripts collect legends separately from the artwork. Match
+  // exact labels (including supplementary numbers) and follow page continuations.
+  const allRows = pages.flatMap((p) => p.rows);
+  const usedLegends = new Set<string>();
+  for (const f of floats.filter((f) => f.id.startsWith("plate-"))) {
+    const key = f.label.replace(/[^a-z0-9]/gi, "").toLowerCase();
+    if (usedLegends.has(key)) {
+      f.caption = `${f.label} (continued)`;
+      continue;
+    }
+    const start = allRows.findIndex((r) => {
+      const match = r.text.match(caption);
+      return (
+        !excluded.has(r) &&
+        match &&
+        (match[1] + match[2]).replace(/[^a-z0-9]/gi, "").toLowerCase() === key
+      );
+    });
+    if (start < 0) continue;
+    const legend: Row[] = [];
+    for (const r of allRows.slice(start)) {
+      if (
+        excluded.has(r) ||
+        (legend.length && (caption.test(r.text) || section.test(r.text)))
+      )
+        break;
+      legend.push(r);
+      excluded.add(r);
+    }
+    f.caption_spans = combine(legend);
+    f.caption = plain(f.caption_spans);
+    usedLegends.add(key);
+  }
   const rows = pages.flatMap((p) => p.rows).filter((r) => !excluded.has(r));
+  if (frontNotes.length) {
+    const referenceIndex = rows.findIndex((r) =>
+      /^References\s*:?$/i.test(r.text),
+    );
+    rows.splice(
+      referenceIndex < 0 ? rows.length : referenceIndex,
+      0,
+      ...frontNotes.slice(1),
+    );
+  }
   const sizes = new Map<number, number>();
   for (const r of rows)
     if (r.text.length > 50) {
@@ -460,27 +598,43 @@ export async function extractArticle(
     }
   const typical = [...sizes].sort((a, b) => b[1] - a[1])[0]?.[0] ?? 11;
   const first = rows.filter((r) => r.page === 0),
-    ai = first.findIndex((r) => /^Abstract$/i.test(r.text));
+    ai = first.findIndex((r) => /^(?:Abstract|Summary)\s*:?$/i.test(r.text));
   const candidates = (ai > 0 ? first.slice(0, ai) : first.slice(0, 12)).filter(
-    (r) => !/doi|copyright|license|https?:/i.test(r.text),
+    (r) =>
+      !/doi|copyright|license|https?:|^(?:Title|Authors?)\s*:/i.test(r.text),
   );
   const maxSize = Math.max(...candidates.map((r) => r.size));
-  const tr = candidates.find((r) => r.size >= maxSize - 0.5) ?? first[0];
+  const titleLabel = first.findIndex((r) => /^Title\s*:/i.test(r.text));
+  const tr =
+    (titleLabel >= 0 ? first[titleLabel + 1] : undefined) ??
+    candidates.find((r) => r.size >= maxSize - 0.5) ??
+    first[0];
+  if (titleLabel >= 0) excluded.add(first[titleLabel]);
   const titles: Row[] = [tr];
   let ti = first.indexOf(tr) + 1;
   while (
     ti < first.length &&
     first[ti].size >= tr.size - 0.5 &&
     first[ti].bbox[1] - titles.at(-1)!.bbox[3] < typical &&
-    tr.size > typical * 1.15
+    (tr.size > typical * 1.15 || titleLabel >= 0) &&
+    !/^Authors?\s*:?$/i.test(first[ti].text)
   )
     titles.push(first[ti++]);
   titles.forEach((r) => excluded.add(r));
   const title = plain(combine(titles));
-  const front = ai > 0 ? first.slice(ti, ai) : [];
+  const front =
+    ai > 0
+      ? first.slice(ti, ai).filter((r) => {
+          if (/^Authors?\s*:?$/i.test(r.text)) {
+            excluded.add(r);
+            return false;
+          }
+          return true;
+        })
+      : [];
   let affIndex = front.findIndex(
     (r) =>
-      /^\d+\s+(Institute|Department|Division|School|University|Faculty|College|Center|Centre|Howard|Herbold|Bioengineering|Inceptive)/i.test(
+      /^\d+[.]?\s+(Institute|Department|Division|School|University|Faculty|College|Center|Centre|Howard|Herbold|Bioengineering|Inceptive)/i.test(
         r.text,
       ) ||
       (r.spans[0]?.script === "super" && /^\d/.test(r.text)),
@@ -488,6 +642,7 @@ export async function extractArticle(
   if (affIndex < 0) affIndex = front.length;
   const authorRows = front.slice(0, affIndex),
     affRows = front.slice(affIndex);
+  if (frontNotes.length) affRows.push(frontNotes[0]);
   const authorSpans = combine(authorRows),
     affSpans = combine(affRows);
   const abstractRows: Row[] = [];
@@ -510,6 +665,27 @@ export async function extractArticle(
     warnings.push(
       "No Abstract heading was found. Check the inferred title and section structure.",
     );
+  // Keep the manuscript label as an abstract boundary, but do not typeset it
+  // as an article heading. Named sections such as Introduction stay intact.
+  const bodyStart = rows.find((r) => !excluded.has(r));
+  if (bodyStart && /^Main text\s*:?$/i.test(bodyStart.text))
+    excluded.add(bodyStart);
+  for (const r of rows.filter((r) => /^Graphical abstract$/i.test(r.text))) {
+    const visual = floats.find(
+      (f) =>
+        f.kind === "figure" &&
+        f.source_page === r.page &&
+        !f.caption &&
+        f.bbox[1] >= r.bbox[3] - 3 &&
+        f.bbox[1] - r.bbox[3] < 90,
+    );
+    if (visual) {
+      visual.label = r.text;
+      visual.caption = r.text;
+      visual.caption_spans = r.spans;
+      excluded.add(r);
+    }
+  }
   const blocks: Block[] = [];
   let prev: Row | undefined;
   for (const r of rows.filter((r) => !excluded.has(r))) {
@@ -519,8 +695,11 @@ export async function extractArticle(
       (r.bold && r.text.length < 160)
         ? "heading"
         : r.pieces.some((p) => /math|cmmi|cmsy|cmex/i.test(p.font)) &&
-            r.text.length < 170 &&
-            r.bbox[0] > 75
+            r.pieces.every(
+              (p) =>
+                /math|cmmi|cmsy|cmex/i.test(p.font) ||
+                !/[a-z]{3,}/i.test(p.text),
+            )
           ? "equation"
           : "paragraph";
     const last = blocks.at(-1);
@@ -530,9 +709,11 @@ export async function extractArticle(
       !prev ||
       kind !== last.kind ||
       kind === "heading" ||
-      kind === "equation" ||
+      (kind === "equation" &&
+        (r.page !== prev.page || r.bbox[1] - prev.bbox[3] > typical)) ||
       numbered ||
-      (r.page === prev.page &&
+      (kind !== "equation" &&
+        r.page === prev.page &&
         (r.bbox[1] - prev.bbox[3] > typical * 0.7 ||
           r.bbox[0] - prev.bbox[0] > 18)) ||
       (r.page !== prev.page && /[.!?:]$/.test(prev.text));
@@ -564,9 +745,9 @@ export async function extractArticle(
           source_page: b.source_pages[0],
           bbox: [
             Math.max(0, b.bbox[0] - 3),
-            Math.max(0, b.bbox[1] - 3),
+            Math.max(0, b.bbox[1] - 1),
             Math.min(w, b.bbox[2] + 3),
-            Math.min(h, b.bbox[3] + 3),
+            Math.min(h, b.bbox[3] + 1),
           ],
           anchor: b.id,
         });
@@ -587,14 +768,17 @@ export async function extractArticle(
       "Possible multi-column source: compare reading order with the original.",
     );
   for (const f of floats) {
-    const num = f.label.match(/(?:Fig(?:ure)?\.?|Table)\s*(\d+)/i)?.[1];
+    const num = f.label.match(/(?:Fig(?:ure)?\.?|Table)\s*(S?\d+)/i)?.[1];
     if (num) {
       const regex = new RegExp(
         `\\b${f.kind === "table" ? "Table" : "Fig(?:ure)?\\.?"}\\s*${num}(?!\\d)`,
         "i",
       );
       f.anchor = blocks.find((b) => regex.test(b.text))?.id ?? null;
-    } else if (f.kind === "figure")
+    } else if (f.id.startsWith("resources-"))
+      f.anchor =
+        blocks.find((b) => /key resources table/i.test(b.text))?.id ?? null;
+    else if (f.kind === "figure")
       f.anchor =
         blocks.find(
           (b) =>
